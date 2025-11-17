@@ -1,7 +1,8 @@
-# ...existing code...
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 from flask_mysqldb import MySQL
 from urllib.parse import urlparse, urljoin
+from flask_bcrypt import Bcrypt
+from datetime import date
 import math
 
 app = Flask(__name__)
@@ -16,6 +17,7 @@ app.config['MYSQL_DB'] = 'ventas'
 app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
 
 mysql = MySQL(app)
+bcrypt = Bcrypt(app)
 
 def is_safe_url(target):
     if not target:
@@ -52,12 +54,10 @@ def registro():
     return render_template('registro.html')
 
 # rutas compatibles usadas por templates admin/baseadmin
-# "Listar" en el menú debe ir a la vista de edición/paginada (editarproductos)
 @app.route('/listar_productos')
 def listar_productos():
     return redirect(url_for('editarproductos'))
 
-# "Agregar" en el menú mostrará la plantilla simple de agregar/listado (listaproducto.html)
 @app.route('/listar_productos_agregados')
 def listar_productos_agregados():
     cursor = mysql.connection.cursor()
@@ -66,8 +66,6 @@ def listar_productos_agregados():
         productos = cursor.fetchall() or []
     finally:
         cursor.close()
-
-    # Renderizamos la plantilla de "agregar" (form + lista simple)
     return render_template('listaproducto.html', productos=productos)
 
 @app.route('/listar')
@@ -90,12 +88,16 @@ def crearusuario():
 
     cursor = mysql.connection.cursor()
     try:
-        cursor.execute("SELECT * FROM usuario WHERE email = %s",(email,))
+        cursor.execute("SELECT id FROM usuario WHERE email = %s",(email,))
         if cursor.fetchone():
             flash('El correo ya está registrado.','warning')
             return redirect(url_for('registro'))
-        cursor.execute("INSERT INTO usuario (nombre,email,password,id_rol) VALUES (%s,%s,%s,%s)",
-                       (nombre,email,password,2))
+
+        hashed = bcrypt.generate_password_hash(password).decode('utf-8')
+        cursor.execute("""
+            INSERT INTO usuario (nombre,email,password,id_rol,created_at,login_count,last_login)
+            VALUES (%s,%s,%s,%s,NOW(),0,NULL)
+        """, (nombre,email,hashed,2))
         mysql.connection.commit()
         flash('Usuario registrado correctamente.','success')
         return redirect(url_for('login'))
@@ -107,11 +109,31 @@ def accesologin():
     if request.method == 'POST' and 'email' in request.form and 'password' in request.form:
         email = request.form['email']
         password = request.form['password']
+
         cursor = mysql.connection.cursor()
-        cursor.execute("SELECT * FROM usuario WHERE email = %s AND password = %s", (email, password))
-        user = cursor.fetchone()
-        cursor.close()
+        try:
+            cursor.execute("SELECT * FROM usuario WHERE email = %s", (email,))
+            user = cursor.fetchone()
+        finally:
+            cursor.close()
+
+        is_valid = False
         if user:
+            try:
+                is_valid = bcrypt.check_password_hash(user['password'], password)
+            except ValueError:
+                is_valid = False
+            if not is_valid:
+                is_valid = (user['password'] == password)  # Fallback para usuarios antiguos en texto plano
+
+        if user and is_valid:
+            cur2 = mysql.connection.cursor()
+            try:
+                cur2.execute("UPDATE usuario SET login_count = login_count + 1, last_login = NOW() WHERE id = %s", (user['id'],))
+                mysql.connection.commit()
+            finally:
+                cur2.close()
+
             session['logueado'] = True
             session['id'] = user['id']
             session['id_rol'] = user['id_rol']
@@ -161,18 +183,27 @@ def listaproducto():
 @app.route('/agregar_producto', methods=['POST'])
 def agregar_producto():
     nombre = request.form.get('nombre')
+    categoria = request.form.get('categoria')
     precio = request.form.get('precio')
     descripcion = request.form.get('descripcion')
+    fecha = (request.form.get('fecha') or '').strip()
+    if not fecha:
+        fecha = date.today().isoformat()  # yyyy-mm-dd
+
+    usuario_id = session.get('id')  # quién lo agregó
+
     cursor = mysql.connection.cursor()
     try:
-        cursor.execute("INSERT INTO productos (nombre,precio,descripcion) VALUES (%s,%s,%s)",
-                       (nombre,precio,descripcion))
+        cursor.execute("""
+            INSERT INTO productos (nombre, categoria, descripcion, precio, fecha, usuario_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (nombre, categoria, descripcion, precio, fecha, usuario_id))
         mysql.connection.commit()
         flash('Producto agregado correctamente.','success')
     finally:
         cursor.close()
-    # volver a la pantalla de agregar/listado para ver el producto añadido
     return redirect(url_for('listar_productos_agregados'))
+
 
 @app.route('/eliminar_producto/<int:id>')
 def eliminar_producto(id):
@@ -188,16 +219,14 @@ def eliminar_producto(id):
         return redirect(ref)
     return redirect(url_for('listar_productos_agregados'))
 
-# Nuevo: página de edición/gestión con filtros y paginación servidor
+# Edición/gestión con filtros y paginación
 @app.route('/editarproductos')
 def editarproductos():
-    # Parámetros
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 10))
     sort = request.args.get('sort', 'id_asc')
     search = request.args.get('search', '').strip()
 
-    # Orden mapping
     order_map = {
         'id_asc': 'id ASC',
         'precio_desc': 'precio DESC',
@@ -213,7 +242,6 @@ def editarproductos():
         where = "WHERE nombre LIKE %s"
         params.append(f"%{search}%")
 
-    # Conteo total
     cursor = mysql.connection.cursor()
     try:
         count_sql = f"SELECT COUNT(*) as total FROM productos {where}"
@@ -221,10 +249,9 @@ def editarproductos():
         total_count = cursor.fetchone().get('total') or 0
 
         total_pages = max(1, math.ceil(total_count / per_page))
-        if page < 1: page = 1
-        if page > total_pages: page = total_pages
-
+        page = max(1, min(page, total_pages))
         offset = (page - 1) * per_page
+
         sql = f"SELECT * FROM productos {where} ORDER BY {order_clause} LIMIT %s OFFSET %s"
         exec_params = params + [per_page, offset]
         cursor.execute(sql, exec_params)
@@ -234,10 +261,8 @@ def editarproductos():
 
     start_item = offset + 1 if total_count > 0 else 0
     end_item = min(offset + per_page, total_count)
-
     per_page_options = [5, 10, 25, 50, 100]
 
-    # Renderizamos la plantilla de edición/paginada (agregarprod.html en tu repo)
     return render_template(
         'agregarprod.html',
         productos=productos,
@@ -267,7 +292,7 @@ def editar_producto_modal(id):
         cursor.close()
     return redirect(url_for('editarproductos'))
 
-# ------------------- USUARIOS ------------------- (admin views)
+# ------------------- USUARIOS (admin) -------------------
 @app.route('/listausuarios')
 def listausuarios():
     cursor = mysql.connection.cursor()
@@ -283,10 +308,14 @@ def agregar_usuario():
     nombre = request.form.get('nombre')
     email = request.form.get('email')
     password = request.form.get('password')
+
+    hashed = bcrypt.generate_password_hash(password).decode('utf-8')
     cursor = mysql.connection.cursor()
     try:
-        cursor.execute("INSERT INTO usuario (nombre,email,password,id_rol) VALUES (%s,%s,%s,%s)",
-                       (nombre,email,password,2))
+        cursor.execute("""
+            INSERT INTO usuario (nombre,email,password,id_rol,created_at,login_count,last_login)
+            VALUES (%s,%s,%s,%s,NOW(),0,NULL)
+        """, (nombre,email,hashed,2))
         mysql.connection.commit()
         flash('Usuario agregado correctamente.','success')
     finally:
@@ -308,11 +337,17 @@ def eliminar_usuario(id):
 def editar_usuario_modal(id):
     nombre = request.form.get('nombre')
     email = request.form.get('email')
-    password = request.form.get('password')
+    password = (request.form.get('password') or '').strip()
+
     cursor = mysql.connection.cursor()
     try:
-        cursor.execute("UPDATE usuario SET nombre=%s,email=%s,password=%s WHERE id=%s",
-                       (nombre,email,password,id))
+        if password:
+            hashed = bcrypt.generate_password_hash(password).decode('utf-8')
+            cursor.execute("UPDATE usuario SET nombre=%s,email=%s,password=%s WHERE id=%s",
+                           (nombre,email,hashed,id))
+        else:
+            cursor.execute("UPDATE usuario SET nombre=%s,email=%s WHERE id=%s",
+                           (nombre,email,id))
         mysql.connection.commit()
         flash('Usuario editado correctamente.','success')
     finally:
@@ -322,11 +357,62 @@ def editar_usuario_modal(id):
 # ------------------- PERFIL ADMIN -------------------
 @app.route('/perfil_admin')
 def perfil_admin():
-    if session.get('id_rol')==1:
-        return render_template('perfiladmin.html')
-    flash('Acceso restringido solo para administradores.','danger')
-    return redirect(url_for('login'))
+    if session.get('id_rol') != 1:
+        flash('Acceso restringido solo para administradores.','danger')
+        return redirect(url_for('login'))
+
+    admin = None
+    user_id = session.get('id')
+    if user_id:
+        cursor = mysql.connection.cursor()
+        try:
+            cursor.execute("SELECT * FROM usuario WHERE id=%s", (user_id,))
+            admin = cursor.fetchone()
+        finally:
+            cursor.close()
+    return render_template('perfiladmin.html', admin=admin)
+
+@app.route('/perfil_admin/editar', methods=['POST'], endpoint='editar_perfil_admin')
+def editar_perfil_admin():
+    if session.get('id_rol') != 1:
+        flash('No autorizado.','danger')
+        return redirect(url_for('login'))
+
+    user_id = session.get('id')
+    if not user_id:
+        flash('No hay sesión activa.','danger')
+        return redirect(url_for('login'))
+
+    nombre = (request.form.get('nombre') or '').strip()
+    email  = (request.form.get('email') or '').strip()
+    password = (request.form.get('password') or '').strip()
+
+    if not nombre or not email:
+        flash('Nombre y correo son obligatorios.','warning')
+        return redirect(url_for('perfil_admin'))
+
+    cursor = mysql.connection.cursor()
+    try:
+        cursor.execute("SELECT id FROM usuario WHERE email=%s AND id<>%s", (email, user_id))
+        existe = cursor.fetchone()
+        if existe:
+            flash('El correo ya está en uso.','warning')
+            return redirect(url_for('perfil_admin'))
+
+        if password:
+            hashed = bcrypt.generate_password_hash(password).decode('utf-8')
+            cursor.execute("UPDATE usuario SET nombre=%s, email=%s, password=%s WHERE id=%s",
+                           (nombre, email, hashed, user_id))
+        else:
+            cursor.execute("UPDATE usuario SET nombre=%s, email=%s WHERE id=%s",
+                           (nombre, email, user_id))
+        mysql.connection.commit()
+        session['nombre'] = nombre
+        flash('Perfil actualizado.','success')
+    finally:
+        cursor.close()
+
+    return redirect(url_for('perfil_admin'))
 
 if __name__ == '__main__':
     app.run(debug=True, port=8000)
-# ...existing code...

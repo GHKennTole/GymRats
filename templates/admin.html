@@ -1,6 +1,65 @@
 {% extends 'baseadmin.html' %}
 {% block title %}Panel de Administración{% endblock %}
 {% block body %}
+
+<style>
+  /* Fondo oscuro como index */
+  body{
+    background:linear-gradient(160deg,#0e0e10,#161618 55%,#1c1c1f);
+  }
+
+  /* Banda de título/sección acorde al index */
+  .section-band{
+    background:#1f1f21;
+    border:1px solid #2a2a2a;
+    color:#fff;
+    border-radius:16px;
+    box-shadow:0 10px 30px -12px rgba(0,0,0,.6);
+  }
+
+  /* Card admin con estética de index */
+  .admin-card{
+    background:#1f1f21;
+    border:1px solid #2a2a2a;
+    color:#e6e6e6;
+    border-radius:18px;
+    overflow:hidden;
+    transition:.3s;
+    height:100%;
+  }
+  .admin-card:hover{
+    transform:translateY(-4px);
+    border-color:#c40000;
+    box-shadow:0 16px 34px -14px rgba(196,0,0,.45);
+  }
+  .admin-card .card-title{
+    color:#ff4d4d;
+    font-weight:600;
+    margin-bottom:.75rem;
+  }
+  .admin-card .thumb{
+    display:block;
+    width:100%;
+    max-width:110px;
+    margin:0 auto;
+    filter:drop-shadow(0 10px 18px rgba(0,0,0,.25));
+  }
+
+  /* Botón primario con rojo GymRats (como en index) */
+  .btn-primary{
+    background:linear-gradient(90deg,#7a0000,#c40000);
+    border:none;
+    color:#fff;
+    font-weight:600;
+    letter-spacing:.3px;
+    box-shadow:0 6px 16px -8px rgba(110,0,0,.55);
+  }
+  .btn-primary:hover{
+    background:linear-gradient(90deg,#c40000,#ff4d4d);
+    transform:translateY(-2px);
+  }
+</style>
+
 {% with messages = get_flashed_messages(with_categories=true) %}
 {% if messages %}
 <ul class=flashes>
@@ -17,65 +76,80 @@ const Toast = Swal.mixin({
         toast.onmouseleave = Swal.resumeTimer;
     }
 });
-Toast.fire({
-    icon: "success",
-    title: "{{message}}"
-});
+Toast.fire({ icon: "success", title: "{{message}}" });
 </script>
 {% endfor %}
 </ul>
 {% endif %}
 {% endwith %}
 
-<div class="container p-5 mt-3">
-    <h2 class="text-center alert alert-danger py-4">Sistema de Gestión de Productos</h2>
-    <div class="row text-center">
-        <div class="col-sm-4 mb-3 mb-sm-0">
-            <div class="card" style="background: linear-gradient(180deg, #355e3b, #7a9f7a, #f1eeda);">
-                <div class="row g-0">
-                    <div class="col-md-8">
-                        <div class="card-body text-white">
-                            <h5 class="card-title">Perfil del Usuario</h5>
-                            <a href="{{ url_for('perfil_admin') }}" class="btn btn-outline-success">Ver Detalles</a>
-                        </div>
-                    </div>
-                    <div class="col-md-4 align-content-center">
-                        <img src="{{ url_for('static', filename='user.png') }}" class="img-fluid rounded-start" alt="Perfil Usuario">
-                    </div>
-                </div>
+<div class="container mt-4">
+  <div class="section-band text-center p-4 mb-4">
+    <h2 class="m-0">Sistema de Gestión de Productos</h2>
+  </div>
+
+  <div class="row g-4">
+    <!-- Perfil -->
+    <div class="col-sm-6 col-lg-4">
+      <div class="card admin-card">
+        <div class="row g-0 h-100">
+          <div class="col-8">
+            <div class="card-body d-flex flex-column">
+              <h5 class="card-title">Perfil del Usuario</h5>
+              <!-- ...existing code... -->
+              <div class="mt-auto">
+                <a href="{{ url_for('perfil_admin') }}" class="btn btn-primary">Ver Detalles</a>
+              </div>
             </div>
+          </div>
+          <div class="col-4 d-flex align-items-center justify-content-center p-2">
+            <img src="{{ url_for('static', filename='user.png') }}" class="thumb" alt="Perfil Usuario">
+          </div>
         </div>
-        <div class="col-sm-4 mb-3 mb-sm-0">
-            <div class="card" style="background: linear-gradient(180deg, #042bf1,#367cd9,#ffffff);">
-                <div class="row g-0">
-                    <div class="col-md-8">
-                        <div class="card-body text-white">
-                            <h5 class="card-title">Registrar Productos</h5>
-                            <a href="{{ url_for('listar_productos_agregados') }}" class="btn btn-outline-success">Ver Detalles</a>
-                        </div>
-                    </div>
-                    <div class="col-md-4 align-content-center">
-                        <a href="{{ url_for('listar_productos_agregados') }}">
-                            <img src="{{ url_for('static', filename='agregarp.png') }}" class="img-fluid rounded-start" alt="Agregar Producto"></a>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="col-sm-4 mb-3 mb-sm-0">
-            <div class="card" style="background: linear-gradient(180deg, #0b235c,#3d85a9,#e0f7ff);">
-                <div class="row g-0">
-                    <div class="col-md-8">
-                        <div class="card-body text-white">
-                            <h5 class="card-title">Visualizar Productos</h5>
-                            <a href="{{ url_for('listar_productos') }}" class="btn btn-outline-success">Ver Detalles</a>
-                        </div>
-                    </div>
-                    <div class="col-md-4 align-content-center">
-                        <img src="{{ url_for('static', filename='listarp.png') }}" class="img-fluid rounded-start" alt="Listar Producto">
-                    </div>
-                </div>
-            </div>
-        </div>
+      </div>
     </div>
+
+    <!-- Registrar productos -->
+    <div class="col-sm-6 col-lg-4">
+      <div class="card admin-card">
+        <div class="row g-0 h-100">
+          <div class="col-8">
+            <div class="card-body d-flex flex-column">
+              <h5 class="card-title">Registrar Productos</h5>
+              <!-- ...existing code... -->
+              <div class="mt-auto">
+                <a href="{{ url_for('listar_productos_agregados') }}" class="btn btn-primary">Ver Detalles</a>
+              </div>
+            </div>
+          </div>
+          <div class="col-4 d-flex align-items-center justify-content-center p-2">
+            <a href="{{ url_for('listar_productos_agregados') }}">
+              <img src="{{ url_for('static', filename='agregarp.png') }}" class="thumb" alt="Agregar Producto">
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Listar productos -->
+    <div class="col-sm-6 col-lg-4">
+      <div class="card admin-card">
+        <div class="row g-0 h-100">
+          <div class="col-8">
+            <div class="card-body d-flex flex-column">
+              <h5 class="card-title">Visualizar Productos</h5>
+              <!-- ...existing code... -->
+              <div class="mt-auto">
+                <a href="{{ url_for('listar_productos') }}" class="btn btn-primary">Ver Detalles</a>
+              </div>
+            </div>
+          </div>
+          <div class="col-4 d-flex align-items-center justify-content-center p-2">
+            <img src="{{ url_for('static', filename='listarp.png') }}" class="thumb" alt="Listar Producto">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}
